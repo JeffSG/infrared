@@ -3,10 +3,21 @@ import datetime
 import math
 import numpy as np
 import serial
+import sys
 import time
+
+if len(sys.argv) < 4:
+	exit('infrared.py <image path> <raw data path> <com port> <sample interval seconds>')
 
 minV = 25.0
 maxV = 35.0
+imgPath = sys.argv[1]
+datPath = sys.argv[2]
+comPort = sys.argv[3]
+try:
+	intervalSec = int(sys.argv[4])
+except:
+	intervalSec = 60
 
 def hsv2rgb(h, s, v):
     h = float(h)
@@ -147,8 +158,14 @@ def generateImg (img):
 	finalImg = render(img3)
 	return finalImg
 
+def configAndOk (ser, cmd):
+	ser.write(cmd.encode())
+	data = ''
+	while not 'OK\r\n' in data:
+		data += ser.read().decode()
+
 ser = serial.Serial()
-ser.port = 'COM3'
+ser.port = comPort
 ser.baudrate = 460800
 ser.bytesize = serial.EIGHTBITS
 ser.parity = serial.PARITY_NONE
@@ -157,13 +174,23 @@ ser.timeout = 1
 
 ser.open()
 time.sleep(1)
+
+configAndOk(ser, '$SETP=9,0\r\n')
+time.sleep(1)
+
 while True:
+	timestamp = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+	print('processing ' + timestamp, end = '')
 	ser.write('$SETP=7,1\r\n'.encode())
 	ser.read(4)
 	ser.read(9)
 	data = ser.read(3840)
-	print(data.decode())
-	values = data.decode().split(' ')
+	framedata = data.decode()
+	values = framedata.split(' ')
+	dataFile = datPath + '\\' + timestamp + '.txt'
+	with open(dataFile, 'w') as f:
+		f.write(framedata)
+		f.close()
 	width = 32
 	height = 24
 	img = np.zeros([height, width], dtype = float)
@@ -172,13 +199,10 @@ while True:
 			v = float(values[row * width + col])
 			img[row, col] = v
 	finalImg = generateImg(img)
-	filePath = 'img\\' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S') + '.jpg'
-	cv2.imwrite(filePath, finalImg)
-	print(filePath)
+	imgFile = imgPath + '\\' + timestamp + '.jpg'
+	cv2.imwrite(imgFile, finalImg)
+	print('...done.')
 	time.sleep(1)
-	ser.write('$SETP=7,0\r\n'.encode())
-	data = ''
-	while not 'OK\r\n' in data:
-		data += ser.read().decode()
-	time.sleep(5)
+	configAndOk(ser, '$SETP=7,0\r\n')
+	time.sleep(intervalSec)
 ser.close()
